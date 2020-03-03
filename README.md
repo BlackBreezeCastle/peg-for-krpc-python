@@ -5,4 +5,4 @@ the test.py tells you how to use it
 
 I've tested it to launch a rocket to the planned orbit.
 But unfortunately there are some problems in the krpc's autopilot.
-So I didn't provide the part about control only about navigation
+So I didn't provide the part about flight control and only left the part about navigation 
