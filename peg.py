@@ -49,6 +49,7 @@ class pegas:
         self.__previous=previous()
         self.__tgo=0.0
         self.__last_stage_mass=0.0
+        self.__gLim=4.5
         self.__output=(self.__vessel.flight().pitch,self.__vessel.flight().heading)
     
     def __upfg(self,n):
@@ -263,7 +264,6 @@ class pegas:
         self.__state.velocity=Vector3.Tuple3(self.__vessel.velocity(self.__reference_frame))
         ''
     def __add_stage(self,massWet,massDry,thrust,isp,gLim,mode):
-        print(massWet,massDry,thrust,isp,gLim,mode)
         _stage=stage()
         _stage.massWet=massWet
         _stage.massDry=massDry
@@ -276,6 +276,7 @@ class pegas:
     def add_stage(self,massWet,massDry,thrust,isp,gLim=4.5):
         _stage=stage()
         last_stage_mass=self.__last_stage_mass
+            
         if thrust==0 or isp==0 or massWet==massDry:
             self.__last_stage_mass=last_stage_mass+massWet
             return None
@@ -283,25 +284,24 @@ class pegas:
         mass_tmp=thrust/(gLim*g0)
         if mass_tmp<=massDry+last_stage_mass:
             self.__add_stage(massWet+last_stage_mass,massDry+last_stage_mass,thrust,isp,gLim,0)
-            self.__last_stage_mass=last_stage_mass+massWet
-            return None
-        
-        self.__add_stage(mass_tmp,massDry+last_stage_mass,thrust,isp,gLim,1)
-        self.__add_stage(massWet+last_stage_mass,mass_tmp,thrust,isp,gLim,0)
+        elif mass_tmp>=massWet+last_stage_mass:
+            self.__add_stage(massWet+last_stage_mass,massDry+last_stage_mass,thrust,isp,gLim,1)
+        else:
+            self.__add_stage(mass_tmp,massDry+last_stage_mass,thrust,isp,gLim,1)
+            self.__add_stage(massWet+last_stage_mass,mass_tmp,thrust,isp,gLim,0)
         self.__last_stage_mass=last_stage_mass+massWet
 
     def update(self):
-        if self.__vessel.available_thrust==0:
-            #self.update_stages()
-            return None
         self.__state.time=self.__conn.space_center.ut
         self.__state.mass=self.__vessel.mass
         self.__state.radius=Vector3.Tuple3(self.__vessel.position(self.__reference_frame))
         self.__state.velocity=Vector3.Tuple3(self.__vessel.velocity(self.__reference_frame))
         
-        n=len(self.__stages)-1
+        n=len(self.__stages)
         self.__stages[0].massWet=self.__state.mass
-        #self.__stages[n].thrust=self.__vessel.available_thrust
+        if self.__state.mass<=self.__stages[0].massDry:
+            self.update_stages()
+            return None
 
         last_tgo=self.__previous.tgo
         self.__upfg(n)
@@ -309,12 +309,32 @@ class pegas:
         #   return None
         return self.__output
 
-    def update_stages(self):
+    def update_stages(self,thrustK=1.0):
         self.__last_stage_mass=0.0
+        self.__stages=[]
         stages=get_stages(self.__vessel.parts.root)
         for i in stages:
-            self.add_stage(i[0],i[1],i[2],i[3])
+            self.add_stage(i[0],i[1],i[2]*thrustK,i[3],self.__gLim)
         self.__stages.reverse()
 
     def time_to_go(self):
             return self.__previous.tgo
+    
+    def time_to_stage(self):
+        stage=self.__stages[0]
+        if stage.mode==0:
+            dm=stage.thrust/(stage.isp*g0)
+            return (stage.massWet-stage.massDry)/dm     
+        else:
+            dv=stage.isp*math.log(stage.massWet/stage.massDry)
+            return dv/stage.gLim
+
+    def angle_to_rd(self):
+        return Vector3.Angle(self.__previous.rd,self.__state.radius)
+
+    def set_max_g(self,g):
+        self.self.__gLim=g
+   
+    def vehicle_info(self):
+        for i in self.__stages:
+            print('wet mass:%f dry mass:%f thurst:%f isp:%f'%(i.massWet,i.massDry,i.thrust,i.isp))
