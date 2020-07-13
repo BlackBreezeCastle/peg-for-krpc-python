@@ -1,0 +1,148 @@
+import krpc
+import time
+import mission
+from peg import *
+
+conn = krpc.connect(name='test')
+vessel = conn.space_center.active_vessel
+body=vessel.orbit.body
+reference_frame=body.non_rotating_reference_frame
+
+
+target_radius = mission.target_altitude+6371000
+target_speed=mission.target_speed
+target_lan=math.radians(mission.target_lan)
+target_inc=math.radians(mission.target_inc)
+turn_angle=mission.turn_angle
+target_normal_vector=target_normal_vector(conn,body,target_inc,target_lan,reference_frame)
+
+'''
+position=conn.add_stream(vessel.position,reference_frame)
+velocity=conn.add_stream(vessel.velocity,reference_frame)
+altitude = conn.add_stream(getattr, vessel.flight(), 'mean_altitude')
+speed=conn.add_stream(getattr, vessel.flight(reference_frame), 'speed')
+horizontal_speed=conn.add_stream(getattr, vessel.flight(body.reference_frame), 'horizontal_speed')
+vertical_speed=conn.add_stream(getattr, vessel.flight(body.reference_frame), 'vertical_speed')
+'''
+peg=pegas(conn)
+peg.set_target(target_inc,target_lan,target_radius,target_speed)
+peg.update_stages()
+peg.vehicle_info()
+input()
+warp_to_launch(conn,target_inc,target_lan,False)
+
+pitch=90
+yaw=math.degrees(target_heading(vessel,target_normal_vector,reference_frame))
+vessel.auto_pilot.engage()
+vessel.auto_pilot.time_to_peak=(3,3,3)
+vessel.auto_pilot.stopping_time=(0.2,0.2,0.2)
+vessel.auto_pilot.attenuation_angle=(0.2,0.2,0.2)
+vessel.auto_pilot.reference_frame=reference_frame
+vessel.auto_pilot.shutdown_speed=target_speed-0.1
+vessel.auto_pilot.target_pitch=pitch
+vessel.auto_pilot.target_roll=math.nan
+vessel.control.rcs=True
+''
+#vessel.auto_pilot.target_pitch=90
+#vessel.auto_pilot.attenuation_angle=(0.2,0.2,0.2)
+
+fair_droped=False
+stage_one_droped=False
+#fair_droped=True
+#stage_one_droped=True
+countdown=10
+while countdown>0:
+    if countdown==6:
+        print('ingition!')
+        vessel.control.throttle = 1.0
+        vessel.control.activate_next_stage()
+    else:
+        print(countdown)
+    countdown=countdown-1
+    time.sleep(1)
+
+print('lift off')
+vessel.control.activate_next_stage()
+
+turn_start_altitude = vessel.flight().mean_altitude+50
+while vessel.flight().mean_altitude<turn_start_altitude:
+    time.sleep(0.1)
+
+print('start gravity turn')
+vessel.auto_pilot.target_roll=0.0
+
+
+while vessel.flight().mean_altitude<turn_start_altitude+500:
+    ''
+    pitch = 90-turn_angle*min((vessel.flight().mean_altitude - turn_start_altitude) /300,1)
+    yaw=math.degrees(target_heading(vessel,target_normal_vector,reference_frame))
+    vessel.auto_pilot.target_pitch_and_heading(pitch,yaw)
+    #time.sleep(0.1)
+
+print('gravity turning')
+while vessel.flight().mean_altitude<30000:
+    ''
+    vertical_speed=vessel.flight(body.reference_frame).vertical_speed
+    horizontal_speed=vessel.flight(body.reference_frame).horizontal_speed
+    pitch=math.degrees(math.atan(vertical_speed/horizontal_speed))
+    yaw=math.degrees(target_heading(vessel,target_normal_vector,reference_frame))
+    vessel.auto_pilot.target_pitch_and_heading(pitch,yaw)
+
+
+''
+print('pega running')
+#vessel.auto_pilot.stopping_time=(0.2,0.2,0.2)
+#vessel.auto_pilot.attenuation_angle=(0.1,0.1,0.1)
+
+
+peg.update_stages()
+peg.vehicle_info()
+for i in range(100):
+    peg.update()
+tgo=1e10  
+
+while True:
+    acc=vessel.thrust/max(vessel.mass,0.1)
+    py=peg.update()
+    if py!=None:
+        pitch=py[0]
+        yaw=py[1]
+    tgo=peg.time_to_go()
+    time_to_stage=peg.time_to_stage()
+    rd=peg.rd_position()
+    print('tgo:%f pitch:%f yaw:%f acc:%f time_to_stage:%f pos: %f %f'%(tgo,math.degrees(pitch),math.degrees(yaw),acc,time_to_stage,rd[0],rd[1]),end='\r')
+
+    #print('tgo',tgo)
+    #print('py',py)
+    if tgo>5:   
+        vessel.auto_pilot.target_pitch_and_heading(math.degrees(pitch),math.degrees(yaw))    
+    if fair_droped==False and vessel.flight().mean_altitude>100000:
+        fair_droped=True
+        vessel.control.activate_next_stage()
+        time.sleep(0.5)
+        peg.update_stages()
+
+    if  time_to_stage<0.5:
+        if stage_one_droped==False:
+            stage_one_droped=True
+            #vessel.control.forward=1
+            #time.sleep(2.0)
+            vessel.control.activate_next_stage()
+            time.sleep(1.0)
+            vessel.control.activate_next_stage()
+            #vessel.auto_pilot.stopping_time=(0.3,0.3,0.3)
+            #time.sleep(8.0)
+            #vessel.control.forward=0
+            for i in range(100):
+                peg.update()
+    else:
+        stage_one_droped=False
+
+    if  vessel.flight(reference_frame).speed>target_speed-1:
+        break
+time.sleep(1)
+vessel.control.throttle = 0.0
+time.sleep(1)
+input()
+vessel.auto_pilot.disengage()
+
