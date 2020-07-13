@@ -1,6 +1,7 @@
 from Kmath import *
 from navigation import *
 from vehicle import get_stages
+import Ktimer
 g0=9.8067
 
 class target:
@@ -51,6 +52,8 @@ class pegas:
         self.__last_stage_mass=0.0
         self.__gLim=4.5
         self.__output=(self.__vessel.flight().pitch,self.__vessel.flight().heading)
+        self.__throttle_bias=Ktimer.integrator() 
+        self.__throttle_bias.set_max(0.99)
     
     def __upfg(self,n):
 
@@ -275,6 +278,7 @@ class pegas:
 
     def add_stage(self,massWet,massDry,thrust,isp,gLim=4.5):
         _stage=stage()
+        self.__stages.reverse()
         last_stage_mass=self.__last_stage_mass
             
         if thrust==0 or isp==0 or massWet==massDry:
@@ -290,18 +294,28 @@ class pegas:
             self.__add_stage(mass_tmp,massDry+last_stage_mass,thrust,isp,gLim,1)
             self.__add_stage(massWet+last_stage_mass,mass_tmp,thrust,isp,gLim,0)
         self.__last_stage_mass=last_stage_mass+massWet
+        self.__stages.reverse()
 
     def update(self):
         self.__state.time=self.__conn.space_center.ut
         self.__state.mass=self.__vessel.mass
         self.__state.radius=Vector3.Tuple3(self.__vessel.position(self.__reference_frame))
         self.__state.velocity=Vector3.Tuple3(self.__vessel.velocity(self.__reference_frame))
-        
+ 
+        vessel=self.__vessel
         n=len(self.__stages)
         self.__stages[0].massWet=self.__state.mass
         if self.__state.mass<=self.__stages[0].massDry:
-            self.update_stages()
+            self.__stages.pop(0)
+            vessel.control.throttle=1.0
+            self.__throttle_bias.clear()
             return None
+        
+        if self.__stages[0].mode!=0:
+            acc=vessel.thrust/max(vessel.mass,0.1)
+            dacc=acc-g0*self.__stages[0].gLim
+            dacc=max(-1,min(1,dacc))
+            vessel.control.throttle = 1.0-self.__throttle_bias.integral(0.4*dacc)
 
         last_tgo=self.__previous.tgo
         self.__upfg(n)
@@ -315,13 +329,11 @@ class pegas:
         stages=get_stages(self.__vessel.parts.root)
         for i in stages:
             self.add_stage(i[0],i[1],i[2]*thrustK,i[3],self.__gLim)
-        self.__stages.reverse()
 
     def time_to_go(self):
             return self.__previous.tgo
     
-    def time_to_stage(self):
-        stage=self.__stages[0]
+    def __time_to_stage(self,stage):
         if stage.mode==0:
             dm=stage.thrust/(stage.isp*g0)
             return (stage.massWet-stage.massDry)/dm     
@@ -329,11 +341,28 @@ class pegas:
             dv=stage.isp*math.log(stage.massWet/stage.massDry)
             return dv/stage.gLim
 
+    def time_to_stage(self):
+        stage=self.__stages[0]
+        ret=self.__time_to_stage(stage)
+        if len(self.__stages)>1:
+            if self.__stages[1].massWet==stage.massDry:
+                ret=ret+self.__time_to_stage(self.__stages[1])
+        return ret
+
+    def stages_num(self):
+        return len(self.__stages)
+
     def angle_to_rd(self):
         return Vector3.Angle(self.__previous.rd,self.__state.radius)
+    
+    def rd_position(self):
+        pos=self.__previous.rd.tuple3()
+        ref=self.__reference_frame
+        body=self.__vessel.orbit.body
+        return (body.longitude_at_position(pos,ref),body.latitude_at_position(pos,ref))
 
     def set_max_g(self,g):
-        self.self.__gLim=g
+        self.__gLim=g
    
     def vehicle_info(self):
         for i in self.__stages:
