@@ -1,7 +1,7 @@
 from Kmath import *
 from navigation import *
 from vehicle import get_stages
-import Ktimer
+#import Ktimer
 g0=9.8067
 
 class target:
@@ -52,8 +52,8 @@ class pegas:
         self.__last_stage_mass=0.0
         self.__gLim=4.5
         self.__output=(self.__vessel.flight().pitch,self.__vessel.flight().heading)
-        self.__throttle_bias=Ktimer.integrator() 
-        self.__throttle_bias.set_max(0.99)
+        #self.__throttle_bias=Ktimer.integrator() 
+        #self.__throttle_bias.set_max(0.99)
     
     def __upfg(self,n):
 
@@ -277,7 +277,6 @@ class pegas:
         self.__stages.append(_stage)
 
     def add_stage(self,massWet,massDry,thrust,isp,gLim=4.5):
-        _stage=stage()
         self.__stages.reverse()
         last_stage_mass=self.__last_stage_mass
             
@@ -308,14 +307,16 @@ class pegas:
         if self.__state.mass<=self.__stages[0].massDry:
             self.__stages.pop(0)
             vessel.control.throttle=1.0
-            self.__throttle_bias.clear()
+            #self.__throttle_bias.clear()
             return None
         
+        '''
         if self.__stages[0].mode!=0:
             acc=vessel.thrust/max(vessel.mass,0.1)
             dacc=acc-g0*self.__stages[0].gLim
             dacc=max(-1,min(1,dacc))
-            vessel.control.throttle = 1.0-self.__throttle_bias.integral(0.4*dacc)
+            vessel.control.throttle = 1.0-self.__throttle_bias.integral(0.05*dacc)
+        '''
 
         last_tgo=self.__previous.tgo
         self.__upfg(n)
@@ -359,7 +360,8 @@ class pegas:
         pos=self.__previous.rd.tuple3()
         ref=self.__reference_frame
         body=self.__vessel.orbit.body
-        return (body.longitude_at_position(pos,ref),body.latitude_at_position(pos,ref))
+        turn_angle=math.degrees(body.rotational_speed*self.__previous.tgo)
+        return (body.longitude_at_position(pos,ref)-turn_angle,body.latitude_at_position(pos,ref))
 
     def set_max_g(self,g):
         self.__gLim=g
