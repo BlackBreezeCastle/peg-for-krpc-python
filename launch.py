@@ -3,8 +3,19 @@ import time
 import mission
 from peg import *
 
+def SetAllEngineGimbalLocked(vessel,IsLocked):
+    if vessel==None:
+        return None
+    parts=vessel.parts.engines
+    if parts==None:
+        return None
+    for i in parts:
+        if i.gimballed==True:
+            i.gimbal_locked= IsLocked  
+
 conn = krpc.connect(name='test')
 vessel = conn.space_center.active_vessel
+SetAllEngineGimbalLocked(vessel,False)
 body=vessel.orbit.body
 reference_frame=body.non_rotating_reference_frame
 
@@ -25,7 +36,8 @@ horizontal_speed=conn.add_stream(getattr, vessel.flight(body.reference_frame), '
 vertical_speed=conn.add_stream(getattr, vessel.flight(body.reference_frame), 'vertical_speed')
 '''
 peg=pegas(conn)
-peg.set_target(target_inc,target_lan,target_radius,target_speed)
+#peg.set_ref_target(target_radius,target_radius,target_inc,target_lan,0.0)
+peg.set_std_target(target_inc,target_lan,target_radius,target_speed,0.0)
 peg.update_stages()
 peg.vehicle_info()
 input()
@@ -34,20 +46,22 @@ warp_to_launch(conn,target_inc,target_lan,False)
 pitch=90
 yaw=math.degrees(target_heading(vessel,target_normal_vector,reference_frame))
 vessel.auto_pilot.engage()
-vessel.auto_pilot.time_to_peak=(3,3,3)
+vessel.auto_pilot.time_to_peak=(6,6,6)
 vessel.auto_pilot.stopping_time=(0.2,0.2,0.2)
-vessel.auto_pilot.attenuation_angle=(0.2,0.2,0.2)
+vessel.auto_pilot.attenuation_angle=(0.2,0.5,0.2)
 vessel.auto_pilot.reference_frame=reference_frame
-vessel.auto_pilot.shutdown_speed=target_speed-0.1
+vessel.auto_pilot.shutdown_speed=target_speed-0.2
+vessel.auto_pilot.max_acceleration(4.5*9.8067)
 vessel.auto_pilot.target_pitch=pitch
 vessel.auto_pilot.target_roll=math.nan
-vessel.control.rcs=True
+vessel.control.rcs=False
 ''
 #vessel.auto_pilot.target_pitch=90
 #vessel.auto_pilot.attenuation_angle=(0.2,0.2,0.2)
 
 fair_droped=False
 stage_one_droped=False
+sediment=False
 #fair_droped=True
 #stage_one_droped=True
 countdown=10
@@ -91,10 +105,9 @@ while vessel.flight().mean_altitude<30000:
 
 ''
 print('pega running')
-#vessel.auto_pilot.stopping_time=(0.2,0.2,0.2)
-#vessel.auto_pilot.attenuation_angle=(0.1,0.1,0.1)
-
-
+vessel.auto_pilot.attenuation_angle=(0.2,0.5,0.2)
+vessel.auto_pilot.stopping_time=(0.1,0.1,0.1)
+vessel.auto_pilot.time_to_peak=(5,5,5)
 peg.update_stages()
 peg.vehicle_info()
 for i in range(100):
@@ -114,7 +127,7 @@ while True:
 
     #print('tgo',tgo)
     #print('py',py)
-    if tgo>5:   
+    if tgo>3:   
         vessel.auto_pilot.target_pitch_and_heading(math.degrees(pitch),math.degrees(yaw))    
     if fair_droped==False and vessel.flight().mean_altitude>100000:
         fair_droped=True
@@ -122,26 +135,34 @@ while True:
         time.sleep(0.5)
         peg.update_stages()
 
-    if  time_to_stage<0.5:
+    if  time_to_stage<0.6:
         if stage_one_droped==False:
             stage_one_droped=True
-            #vessel.control.forward=1
-            #time.sleep(2.0)
+            vessel.control.rcs=True
             vessel.control.activate_next_stage()
-            time.sleep(1.0)
+            time.sleep(2.0)
             vessel.control.activate_next_stage()
-            #vessel.auto_pilot.stopping_time=(0.3,0.3,0.3)
-            #time.sleep(8.0)
-            #vessel.control.forward=0
-            for i in range(100):
+            for i in range(20):
                 peg.update()
     else:
         stage_one_droped=False
-
-    if  vessel.flight(reference_frame).speed>target_speed-1:
+    
+    if acc<1:
+        if sediment==False:
+            vessel.control.forward=1.0
+            vessel.auto_pilot.stopping_time=(300,0.1,300)
+        sediment=True
+    else:
+        if sediment==True:
+            vessel.auto_pilot.stopping_time=(0.1,0.1,0.1)
+            vessel.control.forward=0.0
+        sediment=False
+    if tgo<0.2:
+        vessel.control.throttle = 0.0
         break
+vessel.control.rcs=False
+SetAllEngineGimbalLocked(vessel,True)
 time.sleep(1)
-vessel.control.throttle = 0.0
 time.sleep(1)
 input()
 vessel.auto_pilot.disengage()

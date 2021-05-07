@@ -32,12 +32,17 @@ class integrator:
     def __init__(self,num=0.0):
         self.__timer=Ktimer()
         self.__integral=num
+        self.__max=None
     def integral(self,num):
         deltaTime=self.__timer.delta_t()
         if(deltaTime>1e-6):
             self.__integral=self.__integral+num*deltaTime
+        if self.__max!=None:
+            self.__integral=max(min(self.__integral,self.__max),-self.__max)
         return self.__integral
     def clear(self):
         self.__integral=0.0
     def set(self,num):
         self.__integral=num
+    def set_max(self,_max):
+        self.__max=abs(_max)

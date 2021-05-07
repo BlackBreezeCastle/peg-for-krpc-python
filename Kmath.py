@@ -12,6 +12,38 @@ def normalized_rad(rad):
     rad=rad-math.pi
     return rad
 
+class Kfilter:
+    def __init__(self,over_threshold=1,count_threshold=5):
+        self.old_value=0
+        self.over_count=0
+        self.over_threshold=0
+        self.count_threshold=5
+        self.count_threshold=count_threshold
+        self.over_threshold=over_threshold
+    def filter(self,value):
+        if abs(value-self.old_value)<0.5:
+            self.over_count=0
+            self.old_value=value
+        else:
+            self.over_count=self.over_count+1
+    
+        if self.over_count>=self.count_threshold:
+            self.old_value=value
+            self.over_count=0
+        return self.old_value
+
+class OverMin:
+    def __init__(self,count_threshold=5):
+        self.min_value=1e20
+        self.over_count=0
+    def update(self,value):
+        if value<self.min_value:
+            self.over_count=0            
+            self.min_value=value
+        else:
+            self.over_count=self.over_count+1
+        return self.over_count
+
 #三维向量
 class Vector3:
     def __init__(self,x,y,z):

@@ -76,3 +76,15 @@ def get_stages(root):
                 mass_dry=mass_wet-e[1]
         ret.append([mass_wet,mass_dry,thrust,isp])
     return ret
+
+def vehicle_info(vessel):
+    ret=get_stages(vessel.parts.root)
+    for i in ret:
+        print(i,end=' ')
+        print('m/M',i[0]/i[1])
+''
+conn = krpc.connect(name='vehicle')
+vessel = conn.space_center.active_vessel
+vehicle_info(vessel)
+conn.close()
+''

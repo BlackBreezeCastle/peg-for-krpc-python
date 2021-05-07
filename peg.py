@@ -1,16 +1,18 @@
 from Kmath import *
 from navigation import *
 from vehicle import get_stages
+import kepler
+import Korbit
 #import Ktimer
 g0=9.8067
 
 class target:
     def __init__(self):
-        self.angle=0.0
         self.normal=Vector3(0.0,0.0,0.0)
+        self.orbit=Korbit.orbit()
+        self.angle=0.0
         self.radius=0.0
         self.velocity=0.0
-
 class state:
     def __init__(self):
         self.time=0.0
@@ -52,16 +54,13 @@ class pegas:
         self.__last_stage_mass=0.0
         self.__gLim=4.5
         self.__output=(self.__vessel.flight().pitch,self.__vessel.flight().heading)
-        #self.__throttle_bias=Ktimer.integrator() 
-        #self.__throttle_bias.set_max(0.99)
+        self.__conic_extrapolation=Korbit.orbit()
+        self.__mode=0 #0:standard 1:reference orbit
     
     def __upfg(self,n):
 
         stages=self.__stages
-        gamma = self.__target.angle
         iy = self.__target.normal
-        rdval = self.__target.radius
-        vdval = self.__target.velocity
         t = self.__state.time
         m = self.__state.mass
         r = self.__state.radius
@@ -213,28 +212,43 @@ class pegas:
         self.__output=(pitch,yaw)
     #	7
 
-        '''
+        ''
         rc1 = r - 0.1*rthrust - (tgo/30)*vthrust
         vc1 = v + 1.2*rthrust/tgo - 0.1*vthrust
-        pack=self.__cse(tgo)
-        rgrav = pack[0] -r - rc1 - vc1*tgo
-        vgrav = pack[1] -v - vc1
-        print('p',(pack[0].mag(),pack[1].mag()))
+        self.__conic_extrapolation.set_r_v(rc1.tuple3(),vc1.tuple3(),0,self.__u)
+        pack = self.__conic_extrapolation.state_at_t(tgo)
+        rgrav = Vector3.Tuple3(pack[0]) - rc1 - vc1*tgo
+        vgrav = Vector3.Tuple3(pack[1]) - vc1
 
-        '''
-        w2=self.__u/(rdval**3)
-        vd=v+vgo
-        rgrav=-w2*tgo**2*((3*rd+7*r)*0.05-(2*vd-3*v)/30)
-        vgrav=-w2*tgo*((rd+r)*0.5-(vd-v)*tgo/12)
+        #print(rbias)
+        #print(vbias)
+        #print('\n')
       
     #	8
         rp = r + v*tgo + rgrav + rthrust
         rp = rp - Vector3.Dot(rp,iy)*iy
-        rd = rdval*rp.unit_vector()
-        ix = rd.unit_vector()
-        iz = Vector3.Cross(ix,iy)
-    #	
-        vd=(iz*math.cos(gamma)+ix*math.sin(gamma))*vdval
+
+        vd=Vector3(0.0,0.0,0.0)
+        if self.__mode==0:
+            gamma = self.__target.angle
+            rdval = self.__target.radius
+            vdval = self.__target.velocity
+            rd = rdval*rp.unit_vector()
+            ix = rd.unit_vector()
+            iz = Vector3.Cross(ix,iy)
+            vd=(iz*math.cos(gamma)+ix*math.sin(gamma))*vdval
+        elif self.__mode==1:
+            pe=Vector3.Tuple3(self.__target.orbit.pe_vector())
+            f=Vector3.Angle(pe,rp)
+            if Vector3.Dot(Vector3.Cross(pe,rp),self.__target.normal)>0:
+                f=-f
+            target_state= self.__target.orbit.state_at_f(f)
+
+            rd=Vector3.Tuple3(target_state[0])
+            vd=Vector3.Tuple3(target_state[1])
+        else:
+            print('pegas error:unkown work mode')
+
         vgo = vd - v - vgrav + vbias
 
         self.__previous.rbias = rbias
@@ -245,7 +259,8 @@ class pegas:
         self.__previous.vgo   = vgo 
         self.__previous.tgo=tgo
 
-    def set_target(self,inc,lan,radius,velocity,angle=0.0):
+    def set_std_target(self,inc,lan,radius,velocity,angle=0.0):
+        self.__mode=0
         self.__target.angle=angle
         self.__target.normal=target_normal_vector(self.__conn,self.__earth,inc,lan,self.__reference_frame)
         self.__target.radius=radius
@@ -253,9 +268,30 @@ class pegas:
 
         r=Vector3.Tuple3(self.__vessel.position(self.__reference_frame))
         v=Vector3.Tuple3(self.__vessel.velocity(self.__reference_frame))
-        q=Quaternion.PivotRad(self.__target.normal,math.radians(20))
+        q=Quaternion.PivotRad(self.__target.normal,math.radians(1))
         rd=q.rotate(r)
         vd=Vector3.Cross(rd,self.__target.normal).unit_vector()*velocity
+        self.__previous.rd    = rd   
+        self.__previous.time  = self.__conn.space_center.ut   
+        self.__previous.v     = v
+        self.__previous.vgo   = vd-v
+        ''
+        self.__state.time=self.__conn.space_center.ut
+        self.__state.mass=self.__vessel.mass
+        self.__state.radius=Vector3.Tuple3(self.__vessel.position(self.__reference_frame))
+        self.__state.velocity=Vector3.Tuple3(self.__vessel.velocity(self.__reference_frame))
+
+    def set_ref_target(self,pe,ap,inc,lan,aop):
+        self.__mode=1
+        sem=0.5*(pe+ap)
+        ecc=0.5*(ap-pe)/sem
+        self.__target.normal=target_normal_vector(self.__conn,self.__earth,inc,lan,self.__reference_frame)
+        self.__target.orbit.set_element(sem,ecc,inc,lan,aop,0.0,0.0,self.__u)
+        r=Vector3.Tuple3(self.__vessel.position(self.__reference_frame))
+        v=Vector3.Tuple3(self.__vessel.velocity(self.__reference_frame))
+        q=Quaternion.PivotRad(self.__target.normal,math.radians(20))
+        rd=q.rotate(r)
+        vd=Vector3.Cross(rd,self.__target.normal).unit_vector()*v.mag()
         self.__previous.rd    = rd   
         self.__previous.time  = self.__conn.space_center.ut   
         self.__previous.v     = v
@@ -277,6 +313,7 @@ class pegas:
         self.__stages.append(_stage)
 
     def add_stage(self,massWet,massDry,thrust,isp,gLim=4.5):
+        _stage=stage()
         self.__stages.reverse()
         last_stage_mass=self.__last_stage_mass
             
