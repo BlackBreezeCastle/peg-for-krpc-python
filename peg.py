@@ -56,6 +56,8 @@ class pegas:
         self.__output=(self.__vessel.flight().pitch,self.__vessel.flight().heading)
         self.__conic_extrapolation=Korbit.orbit()
         self.__mode=0 #0:standard 1:reference orbit
+        self.__lambdadot=Vector3(0,0,0)
+        self.__iF_=Vector3(0,0,0)
     
     def __upfg(self,n):
 
@@ -183,14 +185,14 @@ class pegas:
         rgoz = (S - Vector3.Dot(_lambda,rgoxy)) / Vector3.Dot(_lambda,iz)
         rgo = rgoxy + rgoz*iz + rbias
         lambdade = Q - S*J/L
-        lambdadot = (rgo - S*_lambda) / lambdade
-        iF_ = _lambda - lambdadot*J/L
-        iF_ = iF_.unit_vector()
-        phi = Vector3.Angle(iF_,_lambda)
+        self.__lambdadot = (rgo - S*_lambda) / lambdade
+        self.__iF_ = _lambda - self.__lambdadot*J/L
+        self.__iF_ = self.__iF_.unit_vector()
+        phi = Vector3.Angle(self.__iF_,_lambda)
         phidot = -phi*L/J
         vthrust = (L - 0.5*L*phi**2 - J*phi*phidot - 0.5*H*phidot**2)*_lambda
         rthrust = (S - 0.5*S*phi**2 - Q*phi*phidot - 0.5*P*phidot**2)*_lambda
-        rthrust = rthrust - (S*phi + Q*phidot)*lambdadot.unit_vector()
+        rthrust = rthrust - (S*phi + Q*phidot)*self.__lambdadot.unit_vector()
         vbias = vgo - vthrust
         rbias = rgo - rthrust
         rbias=rbias
@@ -200,8 +202,8 @@ class pegas:
     #	TODO: angle rates
         _up = r.unit_vector()
         _east = Vector3.Cross(_up,Vector3(0,1,0)).unit_vector()
-        pitch = math.pi/2-Vector3.Angle(iF_,_up)
-        inplane =iF_- Vector3.Dot(_up,iF_)*_up
+        pitch = math.pi/2-Vector3.Angle(self.__iF_,_up)
+        inplane =self.__iF_ - Vector3.Dot(_up,self.__iF_)*_up
         yaw = Vector3.Angle(inplane,_east)
         tangent = Vector3.Cross(_up,_east)
         if Vector3.Dot(inplane,tangent)<0 :
@@ -258,6 +260,7 @@ class pegas:
         self.__previous.v     = self.__state.velocity
         self.__previous.vgo   = vgo 
         self.__previous.tgo=tgo
+        self.__tgo=self.__previous.tgo
 
     def set_std_target(self,inc,lan,radius,velocity,angle=0.0):
         self.__mode=0
@@ -332,6 +335,32 @@ class pegas:
         self.__last_stage_mass=last_stage_mass+massWet
         self.__stages.reverse()
 
+    def slerp(self):
+        self.__state.time=self.__conn.space_center.ut
+        self.__state.mass=self.__vessel.mass
+        self.__state.radius=Vector3.Tuple3(self.__vessel.position(self.__reference_frame))
+        self.__state.velocity=Vector3.Tuple3(self.__vessel.velocity(self.__reference_frame))
+        r = self.__state.radius
+
+        dt=self.__conn.space_center.ut-self.__previous.time
+        iF_ = self.__iF_ + self.__lambdadot*dt
+        iF_ = iF_.unit_vector()
+        
+        self.__tgo=self.__previous.tgo-dt
+    #	6
+    #	TODO: angle rates
+        _up = r.unit_vector()
+        _east = Vector3.Cross(_up,Vector3(0,1,0)).unit_vector()
+        pitch = math.pi/2-Vector3.Angle(iF_,_up)
+        inplane =iF_- Vector3.Dot(_up,iF_)*_up
+        yaw = Vector3.Angle(inplane,_east)
+        tangent = Vector3.Cross(_up,_east)
+        if Vector3.Dot(inplane,tangent)<0 :
+        	yaw = -yaw
+        yaw=yaw-math.pi/2
+        yaw=normalized_rad(yaw)+math.pi
+        self.__output=(pitch,yaw)        
+
     def update(self):
         self.__state.time=self.__conn.space_center.ut
         self.__state.mass=self.__vessel.mass
@@ -369,7 +398,7 @@ class pegas:
             self.add_stage(i[0],i[1],i[2]*thrustK,i[3],self.__gLim)
 
     def time_to_go(self):
-            return self.__previous.tgo
+            return self.__tgo
     
     def __time_to_stage(self,stage):
         if stage.mode==0:
