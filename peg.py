@@ -1,7 +1,5 @@
 from Kmath import *
 from navigation import *
-from vehicle import get_stages
-import kepler
 import Korbit
 #import Ktimer
 g0=9.8067
@@ -304,7 +302,26 @@ class pegas:
         self.__state.mass=self.__vessel.mass
         self.__state.radius=Vector3.Tuple3(self.__vessel.position(self.__reference_frame))
         self.__state.velocity=Vector3.Tuple3(self.__vessel.velocity(self.__reference_frame))
-        ''
+    def set_radius_speed_target(self,radius,velocity,angle=0.0):
+        self.__mode=0
+        self.__target.angle=angle
+        self.__state.radius=Vector3.Tuple3(self.__vessel.position(self.__reference_frame))
+        self.__state.velocity=Vector3.Tuple3(self.__vessel.velocity(self.__reference_frame))
+        self.__target.normal=Vector3.Cross(self.__state.velocity,self.__state.radius).unit_vector()
+        self.__target.radius=radius
+        self.__target.velocity=velocity
+
+        r=Vector3.Tuple3(self.__vessel.position(self.__reference_frame))
+        v=Vector3.Tuple3(self.__vessel.velocity(self.__reference_frame))
+        q=Quaternion.PivotRad(self.__target.normal,math.radians(1))
+        rd=q.rotate(r)
+        vd=Vector3.Cross(rd,self.__target.normal).unit_vector()*velocity
+        self.__previous.rd    = rd   
+        self.__previous.time  = self.__conn.space_center.ut   
+        self.__previous.v     = v
+        self.__previous.vgo   = vd-v
+        self.__state.time=self.__conn.space_center.ut
+        self.__state.mass=self.__vessel.mass
     def __add_stage(self,massWet,massDry,thrust,isp,gLim,mode):
         _stage=stage()
         _stage.massWet=massWet
